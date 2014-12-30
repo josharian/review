@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -178,4 +179,37 @@ func TestGofmtAmbiguousRevision(t *testing.T) {
 	write(t, gt.client+"/HEAD", "foo")
 
 	testMain(t, "gofmt")
+}
+
+// Issue 9476
+func TestGofmtTempPath(t *testing.T) {
+	gt := newGitTest(t)
+	defer gt.done()
+
+	gt.work(t)
+
+	a := filepath.Join(gt.client, "a")
+	b := filepath.Join(gt.client, "b")
+
+	if err := os.Mkdir(a, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(b, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	ag := filepath.Join(a, "g.go")
+	bg := filepath.Join(b, "g.go")
+
+	write(t, ag, "package a\n")
+	write(t, bg, "package b\n")
+	trun(t, gt.client, "git", "add", ".")
+	write(t, bg, "package b\n\n")
+	os.Chdir(a)
+
+	testMain(t, "gofmt", "-l")
+	// this used to die with:
+	//   git-codereview: gofmt reported errors:
+	// 	  		stat : no such file or directory
+	testPrintedStdout(t, bg)
 }

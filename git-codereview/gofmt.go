@@ -139,32 +139,26 @@ func runGofmt(flags int) (files []string, stderrText string) {
 	// file would be checked out (if not for the unstaged changes).
 	tempToFile := map[string]string{}
 	fileToTemp := map[string]string{}
-	cleanup := func() {} // call before dying (defer won't run)
-	if len(needTemp) > 0 {
-		// Ask Git to copy the index versions into temporary files.
-		// Git stores the temporary files, named .merge_*, in the repo root.
-		// Unlike the Git commands above, the non-temp file names printed
-		// here are relative to the current directory, not the repo root.
-		args := []string{"checkout-index", "--temp", "--"}
-		args = append(args, needTemp...)
-		for _, line := range getLines("git", args...) {
+	cleanup := func() {
+		for temp := range tempToFile {
+			os.Remove(temp)
+		}
+		tempToFile = nil
+	}
+	defer cleanup() // harmless if tempToFile is empty
+	// Ask Git to copy the index versions into temporary files.
+	// Git stores the temporary files, named .merge_*, in the repo root.
+	for _, file := range needTemp {
+		for _, line := range getLines("git", "checkout-index", "--temp", "--", file) {
 			i := strings.Index(line, "\t")
 			if i < 0 {
 				continue
 			}
-			temp, file := line[:i], line[i+1:]
+			temp := line[:i]
 			temp = filepath.Join(repo, temp)
-			file = filepath.Join(pwd, file)
 			tempToFile[temp] = file
 			fileToTemp[file] = temp
 		}
-		cleanup = func() {
-			for temp := range tempToFile {
-				os.Remove(temp)
-			}
-			tempToFile = nil
-		}
-		defer cleanup()
 	}
 	dief := func(format string, args ...interface{}) {
 		cleanup()
