@@ -118,6 +118,13 @@ func runGofmt(flags int) (files []string, stderrText string) {
 		repo += string(filepath.Separator)
 	}
 
+	// Do all work in the repo root.
+	// This works around a bug in git checkout-index --temp. See issue 9476.
+	if err := os.Chdir(repo); err != nil {
+		dief("%v", err)
+	}
+	defer os.Chdir(pwd)
+
 	// Find files modified in the index compared to the branchpoint.
 	indexFiles := addRoot(repo, filter(gofmtRequired, getLines("git", "diff", "--name-only", "--diff-filter=ACM", "--cached", b.Branchpoint(), "--")))
 	localFiles := addRoot(repo, filter(gofmtRequired, getLines("git", "diff", "--name-only", "--diff-filter=ACM")))
@@ -143,8 +150,6 @@ func runGofmt(flags int) (files []string, stderrText string) {
 	if len(needTemp) > 0 {
 		// Ask Git to copy the index versions into temporary files.
 		// Git stores the temporary files, named .merge_*, in the repo root.
-		// Unlike the Git commands above, the non-temp file names printed
-		// here are relative to the current directory, not the repo root.
 		args := []string{"checkout-index", "--temp", "--"}
 		args = append(args, needTemp...)
 		for _, line := range getLines("git", args...) {
@@ -154,7 +159,7 @@ func runGofmt(flags int) (files []string, stderrText string) {
 			}
 			temp, file := line[:i], line[i+1:]
 			temp = filepath.Join(repo, temp)
-			file = filepath.Join(pwd, file)
+			file = filepath.Join(repo, file)
 			tempToFile[temp] = file
 			fileToTemp[file] = temp
 		}
@@ -173,9 +178,6 @@ func runGofmt(flags int) (files []string, stderrText string) {
 
 	// Run gofmt to find out which files need reformatting;
 	// if gofmtWrite is set, reformat them in place.
-	// For references to local files, remove leading pwd if present
-	// to make relative to current directory.
-	// Temp files and local-only files stay as absolute paths for easy matching in output.
 	args := []string{"-l"}
 	if flags&gofmtWrite != 0 {
 		args = append(args, "-w")
@@ -184,7 +186,7 @@ func runGofmt(flags int) (files []string, stderrText string) {
 		if isUnstaged(file) {
 			args = append(args, fileToTemp[file])
 		} else {
-			args = append(args, strings.TrimPrefix(file, pwd))
+			args = append(args, file)
 		}
 	}
 	if flags&gofmtCommand != 0 {
@@ -254,9 +256,9 @@ func runGofmt(flags int) (files []string, stderrText string) {
 			if flags&gofmtCommand != 0 {
 				real += " (staged)"
 			}
-			files[i] = strings.TrimPrefix(real, pwd)
+			files[i] = strings.TrimPrefix(real, repo)
 		} else if isUnstaged(file) {
-			files[i] = strings.TrimPrefix(file+" (unstaged)", pwd)
+			files[i] = strings.TrimPrefix(file+" (unstaged)", repo)
 		}
 	}
 
@@ -267,10 +269,10 @@ func runGofmt(flags int) (files []string, stderrText string) {
 		if flags&gofmtCommand != 0 {
 			file += " (staged)"
 		}
-		text = strings.Replace(text, "\n"+temp+":", "\n"+strings.TrimPrefix(file, pwd)+":", -1)
+		text = strings.Replace(text, "\n"+temp+":", "\n"+strings.TrimPrefix(file, repo)+":", -1)
 	}
 	for _, file := range localFiles {
-		text = strings.Replace(text, "\n"+file+":", "\n"+strings.TrimPrefix(file, pwd)+":", -1)
+		text = strings.Replace(text, "\n"+file+":", "\n"+strings.TrimPrefix(file, repo)+":", -1)
 	}
 	text = text[1:]
 
